@@ -63,6 +63,9 @@ final class AppPreferences {
     @UserDefault(key: "playSoundOnRecordStart", defaultValue: false)
     var playSoundOnRecordStart: Bool
     
+    @UserDefault(key: "playSoundOnTranscriptionComplete_v2", defaultValue: false)
+    var playSoundOnTranscriptionComplete: Bool
+    
     @UserDefault(key: "hasCompletedOnboarding", defaultValue: false)
     var hasCompletedOnboarding: Bool
     

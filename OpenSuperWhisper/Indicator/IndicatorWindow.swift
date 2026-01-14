@@ -20,10 +20,12 @@ class IndicatorViewModel: ObservableObject {
     @Published var isBlinking = false
     @Published var recorder: AudioRecorder = .shared
     @Published var isVisible = false
+    @Published var audioLevels: [Float] = Array(repeating: 0.0, count: 40)
     
     var delegate: IndicatorViewDelegate?
     private var blinkTimer: Timer?
     private var hideTimer: Timer?
+    private var audioLevelTimer: Timer?
     
     private let recordingStore: RecordingStore
     private let transcriptionService: TranscriptionService
@@ -58,11 +60,35 @@ class IndicatorViewModel: ObservableObject {
         
         state = .recording
         startBlinking()
+        startAudioLevelSampling()
         recorder.startRecording()
+    }
+    
+    private func startAudioLevelSampling() {
+        audioLevels = Array(repeating: 0.0, count: 40)
+        audioLevelTimer?.invalidate()
+        audioLevelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self else { return }
+                self.sampleAudioLevel()
+            }
+        }
+    }
+    
+    private func stopAudioLevelSampling() {
+        audioLevelTimer?.invalidate()
+        audioLevelTimer = nil
+    }
+    
+    private func sampleAudioLevel() {
+        let level = recorder.audioLevel
+        audioLevels.removeFirst()
+        audioLevels.append(level)
     }
     
     func startDecoding() {
         stopBlinking()
+        stopAudioLevelSampling()
         
         if isTranscriptionBusy {
             recorder.cancelRecording()
@@ -158,23 +184,54 @@ class IndicatorViewModel: ObservableObject {
     func cancelRecording() {
         hideTimer?.invalidate()
         hideTimer = nil
+        stopAudioLevelSampling()
         recorder.cancelRecording()
     }
 
     @MainActor
     func hideWithAnimation() async {
-        await withCheckedContinuation { continuation in
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                self.isVisible = false
-            } completion: {
-                continuation.resume()
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            self.isVisible = false
+        }
+        // Wait for animation to complete
+        try? await Task.sleep(nanoseconds: 300_000_000)
+    }
+}
+
+struct AudioWaveformView: View {
+    let levels: [Float]
+    let barCount: Int = 40
+    let barSpacing: CGFloat = 4
+    
+    var body: some View {
+        GeometryReader { geometry in
+            HStack(spacing: barSpacing) {
+                ForEach(0..<barCount, id: \.self) { index in
+                    let level = index < levels.count ? CGFloat(levels[index]) : 0
+                    // Minimum height so bars are always visible, max based on container
+                    let minHeight: CGFloat = 4
+                    let maxHeight = geometry.size.height
+                    let barHeight = minHeight + (maxHeight - minHeight) * level
+                    
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.primary.opacity(0.8))
+                        .frame(width: 3, height: barHeight)
+                        .animation(.easeOut(duration: 0.05), value: level)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
     }
 }
 
 struct RecordingIndicator: View {
     let isBlinking: Bool
+    let size: CGFloat
+    
+    init(isBlinking: Bool, size: CGFloat = 8) {
+        self.isBlinking = isBlinking
+        self.size = size
+    }
     
     var body: some View {
         Circle()
@@ -188,16 +245,35 @@ struct RecordingIndicator: View {
                     endPoint: .bottomTrailing
                 )
             )
-            .frame(width: 8, height: 8)
-            .shadow(color: .red.opacity(0.5), radius: 4)
+            .frame(width: size, height: size)
+            .shadow(color: .red.opacity(0.5), radius: size / 2)
             .opacity(isBlinking ? 0.3 : 1.0)
             .animation(.easeInOut(duration: 0.4), value: isBlinking)
     }
 }
 
+private let funnyProcessingPhrases = [
+    "Crunching words...",
+    "Decoding vibes...",
+    "Cooking up text...",
+    "Doing the thing...",
+    "Brain go brrr...",
+    "Yapping to text...",
+    "Translating mumbles...",
+    "Working on it...",
+    "Figuring it out...",
+    "Spinning gears...",
+    "Summoning words...",
+    "Extracting wisdom...",
+    "Processing noises...",
+    "Making sense...",
+    "Almost there...",
+]
+
 struct IndicatorWindow: View {
     @ObservedObject var viewModel: IndicatorViewModel
     @Environment(\.colorScheme) private var colorScheme
+    @State private var processingPhrase: String = funnyProcessingPhrases.randomElement() ?? "Processing..."
     
     private var backgroundColor: Color {
         colorScheme == .dark
@@ -206,65 +282,59 @@ struct IndicatorWindow: View {
     }
     
     var body: some View {
-
-        let rect = RoundedRectangle(cornerRadius: 24)
+        let rect = RoundedRectangle(cornerRadius: 32)
         
-        VStack(spacing: 12) {
+        VStack(spacing: 16) {
             switch viewModel.state {
             case .recording:
-                HStack(spacing: 8) {
-                    RecordingIndicator(isBlinking: viewModel.isBlinking)
-                        .frame(width: 24)
-                    
-                    Text("Recording...")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                AudioWaveformView(levels: viewModel.audioLevels)
+                    .frame(height: 80)
+                    .padding(.horizontal, 8)
                 
             case .decoding:
-                HStack(spacing: 8) {
+                HStack(spacing: 12) {
                     ProgressView()
-                        .scaleEffect(0.7)
-                        .frame(width: 24)
+                        .scaleEffect(1.2)
+                        .frame(width: 32)
                     
-                    Text("Transcribing...")
-                        .font(.system(size: 13, weight: .semibold))
+                    Text(processingPhrase)
+                        .font(.system(size: 24, weight: .semibold))
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 
             case .busy:
-                HStack(spacing: 8) {
+                HStack(spacing: 12) {
                     Image(systemName: "hourglass")
+                        .font(.system(size: 24))
                         .foregroundColor(.orange)
-                        .frame(width: 24)
+                        .frame(width: 32)
                     
                     Text("Processing...")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 24, weight: .semibold))
                         .foregroundColor(.orange)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 
             case .idle:
                 EmptyView()
             }
         }
-        .padding(.horizontal, 24)
-        .frame(height: 36)
+        .padding(.horizontal, 32)
+        .padding(.vertical, 24)
+        .frame(width: 380, height: viewModel.state == .recording ? 120 : 80)
         .background {
             rect
                 .fill(backgroundColor)
                 .background {
                     rect
-                        .fill(Material.thinMaterial)
+                        .fill(Material.regularMaterial)
                 }
-                .shadow(color: .black.opacity(0.15), radius: 10, x: 0, y: 4)
+                .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 8)
         }
         .clipShape(rect)
-        .frame(width: 200)
         .scaleEffect(viewModel.isVisible ? 1 : 0.5)
-        .offset(y: viewModel.isVisible ? 0 : 20)
+        .offset(y: viewModel.isVisible ? 0 : 30)
         .opacity(viewModel.isVisible ? 1 : 0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.isVisible)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.state)
         .onAppear {
             viewModel.isVisible = true
         }

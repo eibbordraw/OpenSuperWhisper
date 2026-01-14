@@ -23,7 +23,7 @@ class IndicatorWindowManager: IndicatorViewDelegate {
         if window == nil {
             // Create window if it doesn't exist - using NSPanel for full-screen compatibility
             let panel = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 200, height: 60),
+                contentRect: NSRect(x: 0, y: 0, width: 400, height: 160),
                 styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
                 defer: false
@@ -33,8 +33,8 @@ class IndicatorWindowManager: IndicatorViewDelegate {
             panel.backgroundColor = .clear
             panel.isOpaque = false
             panel.hasShadow = false
-            panel.ignoresMouseEvents = true
             panel.hidesOnDeactivate = false
+            panel.isMovableByWindowBackground = true
             
             self.window = panel
         }
@@ -52,9 +52,9 @@ class IndicatorWindowManager: IndicatorViewDelegate {
                 x = point.x - windowFrame.width / 2
                 y = point.y + 20 // 20 points above cursor
             } else {
-                // Default to top center of screen
+                // Default to center horizontally, near top (about 1/4 from top)
                 x = screenFrame.midX - windowFrame.width / 2
-                y = screenFrame.maxY - windowFrame.height - 100 // 100 pixels from top
+                y = screenFrame.maxY - windowFrame.height - 200 // 200 pixels from top
             }
             
             // Adjust if out of screen bounds

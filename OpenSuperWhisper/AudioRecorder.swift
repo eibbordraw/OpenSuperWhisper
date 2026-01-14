@@ -9,6 +9,7 @@ class AudioRecorder: NSObject, ObservableObject {
     @Published var isPlaying = false
     @Published var currentlyPlayingURL: URL?
     @Published var canRecord = false
+    @Published var audioLevel: Float = 0.0
     
     private var audioRecorder: AVAudioRecorder?
     private var audioPlayer: AVAudioPlayer?
@@ -17,6 +18,7 @@ class AudioRecorder: NSObject, ObservableObject {
     private var currentRecordingURL: URL?
     private var notificationObserver: Any?
     private var microphoneChangeObserver: Any?
+    private var meteringTimer: Timer?
 
     // MARK: - Singleton Instance
 
@@ -146,8 +148,10 @@ class AudioRecorder: NSObject, ObservableObject {
         do {
             audioRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
             audioRecorder?.delegate = self
+            audioRecorder?.isMeteringEnabled = true
             audioRecorder?.record()
             isRecording = true
+            startMeteringTimer()
             
             print("Recording started successfully")
         } catch {
@@ -156,7 +160,37 @@ class AudioRecorder: NSObject, ObservableObject {
         }
     }
     
+    private func startMeteringTimer() {
+        meteringTimer?.invalidate()
+        meteringTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.updateAudioLevel()
+        }
+    }
+    
+    private func stopMeteringTimer() {
+        meteringTimer?.invalidate()
+        meteringTimer = nil
+        audioLevel = 0.0
+    }
+    
+    private func updateAudioLevel() {
+        guard let recorder = audioRecorder, recorder.isRecording else {
+            audioLevel = 0.0
+            return
+        }
+        
+        recorder.updateMeters()
+        let averagePower = recorder.averagePower(forChannel: 0)
+        // Convert from dB (-160 to 0) to normalized value (0 to 1)
+        // Typical speech is around -20 to -10 dB
+        let minDb: Float = -60.0
+        let maxDb: Float = 0.0
+        let normalizedLevel = max(0.0, min(1.0, (averagePower - minDb) / (maxDb - minDb)))
+        audioLevel = normalizedLevel
+    }
+    
     func stopRecording() -> URL? {
+        stopMeteringTimer()
         audioRecorder?.stop()
         isRecording = false
         
@@ -175,6 +209,7 @@ class AudioRecorder: NSObject, ObservableObject {
     }
     
     func cancelRecording() {
+        stopMeteringTimer()
         audioRecorder?.stop()
         isRecording = false
         

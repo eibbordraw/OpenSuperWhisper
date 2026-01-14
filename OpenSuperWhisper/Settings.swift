@@ -82,6 +82,12 @@ class SettingsViewModel: ObservableObject {
         }
     }
     
+    @Published var playSoundOnTranscriptionComplete: Bool {
+        didSet {
+            AppPreferences.shared.playSoundOnTranscriptionComplete = playSoundOnTranscriptionComplete
+        }
+    }
+    
     @Published var useAsianAutocorrect: Bool {
         didSet {
             AppPreferences.shared.useAsianAutocorrect = useAsianAutocorrect
@@ -101,6 +107,7 @@ class SettingsViewModel: ObservableObject {
         self.beamSize = prefs.beamSize
         self.debugMode = prefs.debugMode
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
+        self.playSoundOnTranscriptionComplete = prefs.playSoundOnTranscriptionComplete
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
         
         if let savedPath = prefs.selectedModelPath {
@@ -537,6 +544,14 @@ struct SettingsView: View {
                         }
                         .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
                         .help("Play a notification sound when recording begins")
+                        .padding(.top, 4)
+                        
+                        Toggle(isOn: $viewModel.playSoundOnTranscriptionComplete) {
+                            Text("Play sound when transcription completes")
+                                .font(.subheadline)
+                        }
+                        .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                        .help("Play a notification sound when transcription finishes")
                         .padding(.top, 4)
                     }
                 }
