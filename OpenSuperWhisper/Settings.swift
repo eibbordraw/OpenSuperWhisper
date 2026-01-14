@@ -94,6 +94,44 @@ class SettingsViewModel: ObservableObject {
         }
     }
     
+    // Performance settings
+    @Published var useSingleSegment: Bool {
+        didSet {
+            AppPreferences.shared.useSingleSegment = useSingleSegment
+        }
+    }
+    
+    @Published var threadCountOverride: Int {
+        didSet {
+            AppPreferences.shared.threadCountOverride = threadCountOverride
+        }
+    }
+    
+    @Published var speedPreset: String {
+        didSet {
+            AppPreferences.shared.speedPreset = speedPreset
+            applySpeedPreset(speedPreset)
+        }
+    }
+    
+    func applySpeedPreset(_ preset: String) {
+        switch preset {
+        case "fastest":
+            useSingleSegment = true
+            threadCountOverride = ProcessInfo.processInfo.activeProcessorCount
+            useBeamSearch = false
+        case "quality":
+            useSingleSegment = false
+            threadCountOverride = 0 // Auto
+            useBeamSearch = true
+            beamSize = 5
+        default: // "balanced"
+            useSingleSegment = false
+            threadCountOverride = 0 // Auto
+            useBeamSearch = false
+        }
+    }
+    
     init() {
         let prefs = AppPreferences.shared
         self.selectedLanguage = prefs.whisperLanguage
@@ -109,6 +147,9 @@ class SettingsViewModel: ObservableObject {
         self.playSoundOnRecordStart = prefs.playSoundOnRecordStart
         self.playSoundOnTranscriptionComplete = prefs.playSoundOnTranscriptionComplete
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
+        self.useSingleSegment = prefs.useSingleSegment
+        self.threadCountOverride = prefs.threadCountOverride
+        self.speedPreset = prefs.speedPreset
         
         if let savedPath = prefs.selectedModelPath {
             self.selectedModelURL = URL(fileURLWithPath: savedPath)
@@ -135,6 +176,8 @@ struct Settings {
     var useBeamSearch: Bool
     var beamSize: Int
     var useAsianAutocorrect: Bool
+    var useSingleSegment: Bool
+    var threadCountOverride: Int
     
     init() {
         let prefs = AppPreferences.shared
@@ -148,6 +191,8 @@ struct Settings {
         self.useBeamSearch = prefs.useBeamSearch
         self.beamSize = prefs.beamSize
         self.useAsianAutocorrect = prefs.useAsianAutocorrect
+        self.useSingleSegment = prefs.useSingleSegment
+        self.threadCountOverride = prefs.threadCountOverride
     }
 }
 
@@ -418,6 +463,60 @@ struct SettingsView: View {
     private var advancedSettings: some View {
         Form {
             VStack(spacing: 20) {
+                // Performance Settings
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Performance")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Speed Preset:")
+                                .font(.subheadline)
+                            Spacer()
+                            Picker("", selection: $viewModel.speedPreset) {
+                                Text("Fastest").tag("fastest")
+                                Text("Balanced").tag("balanced")
+                                Text("Best Quality").tag("quality")
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 280)
+                        }
+                        .help("Quick presets: Fastest (greedy, max threads), Balanced (greedy, auto), Best Quality (beam search)")
+                        
+                        Divider()
+                            .padding(.vertical, 4)
+                        
+                        Toggle(isOn: $viewModel.useSingleSegment) {
+                            Text("Single Segment Mode")
+                                .font(.subheadline)
+                        }
+                        .toggleStyle(SwitchToggleStyle(tint: Color.accentColor))
+                        .help("Faster for short recordings under 30 seconds")
+                        
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Thread Count:")
+                                    .font(.subheadline)
+                                Spacer()
+                                Text(viewModel.threadCountOverride == 0 ? "Auto (\(max(4, ProcessInfo.processInfo.activeProcessorCount - 2)))" : "\(viewModel.threadCountOverride)")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Slider(value: Binding(
+                                get: { Double(viewModel.threadCountOverride) },
+                                set: { viewModel.threadCountOverride = Int($0) }
+                            ), in: 0...16, step: 1)
+                                .help("0 = Auto (uses available CPU cores). Higher values may improve speed on multi-core systems")
+                        }
+                    }
+                }
+                .padding()
+                .background(Color(.controlBackgroundColor).opacity(0.3))
+                .cornerRadius(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                
                 // Decoding Strategy
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Decoding Strategy")

@@ -258,8 +258,12 @@ class TranscriptionQueue: ObservableObject {
         return try await withCheckedThrowingContinuation { continuation in
             Task.detached(priority: .userInitiated) { [self] in
                 let context = contextForTask
+                let settings = Settings()
                 
-                let nThreads = 4
+                // Use thread count override if set, otherwise auto-detect based on CPU cores
+                let nThreads = settings.threadCountOverride > 0 
+                    ? settings.threadCountOverride 
+                    : max(4, ProcessInfo.processInfo.activeProcessorCount - 2)
                 
                 guard context.pcmToMel(samples: samples, nSamples: samples.count, nThreads: nThreads) else {
                     continuation.resume(throwing: TranscriptionError.processingFailed)
@@ -272,7 +276,6 @@ class TranscriptionQueue: ObservableObject {
                 }
                 
                 var params = WhisperFullParams()
-                let settings = Settings()
                 
                 params.strategy = settings.useBeamSearch ? .beamSearch : .greedy
                 params.nThreads = Int32(nThreads)
@@ -282,8 +285,10 @@ class TranscriptionQueue: ObservableObject {
                 params.language = settings.selectedLanguage != "auto" ? settings.selectedLanguage : nil
                 params.detectLanguage = false
                 params.temperature = Float(settings.temperature)
+                params.temperatureInc = 0.1 // Reduced from default 0.2 for fewer retries
                 params.noSpeechThold = Float(settings.noSpeechThreshold)
                 params.initialPrompt = settings.initialPrompt.isEmpty ? nil : settings.initialPrompt
+                params.singleSegment = settings.useSingleSegment
                 
                 if settings.useBeamSearch {
                     params.beamSearchBeamSize = Int32(settings.beamSize)

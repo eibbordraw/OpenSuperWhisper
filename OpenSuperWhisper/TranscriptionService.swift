@@ -159,7 +159,10 @@ class TranscriptionService: ObservableObject {
             // Check for cancellation
             try Task.checkCancellation()
             
-            let nThreads = 4
+            // Use thread count override if set, otherwise auto-detect based on CPU cores
+            let nThreads = settings.threadCountOverride > 0 
+                ? settings.threadCountOverride 
+                : max(4, ProcessInfo.processInfo.activeProcessorCount - 2)
             
             guard context.pcmToMel(samples: samples, nSamples: samples.count, nThreads: nThreads) else {
                 throw TranscriptionError.processingFailed
@@ -186,8 +189,10 @@ class TranscriptionService: ObservableObject {
             params.detectLanguage = false // should be false, whisper handles language detection by language property.
             
             params.temperature = Float(settings.temperature)
+            params.temperatureInc = 0.1 // Reduced from default 0.2 for fewer retries
             params.noSpeechThold = Float(settings.noSpeechThreshold)
             params.initialPrompt = settings.initialPrompt.isEmpty ? nil : settings.initialPrompt
+            params.singleSegment = settings.useSingleSegment
             
             // Set up the abort callback
             typealias GGMLAbortCallback = @convention(c) (UnsafeMutableRawPointer?) -> Bool
@@ -348,15 +353,16 @@ class TranscriptionService: ObservableObject {
                                        channels: 1,
                                        interleaved: false)!
             
-            let engine = AVAudioEngine()
-            let player = AVAudioPlayerNode()
             let converter = AVAudioConverter(from: audioFile.processingFormat, to: format)!
-            
-            engine.attach(player)
-            engine.connect(player, to: engine.mainMixerNode, format: audioFile.processingFormat)
             
             let totalFrames = audioFile.length
             var framesRead: Int64 = 0
+            var lastProgressUpdate: Int64 = 0
+            
+            // Use larger chunk size to reduce callback overhead
+            let chunkSize: AVAudioFrameCount = 8192
+            // Only update progress every ~10% to reduce callback overhead
+            let progressUpdateInterval = max(totalFrames / 10, 1)
             
             let lengthInFrames = UInt32(audioFile.length)
             let buffer = AVAudioPCMBuffer(pcmFormat: format,
@@ -364,23 +370,38 @@ class TranscriptionService: ObservableObject {
             
             guard let buffer = buffer else { return nil }
             
+            // Pre-allocate a reusable temp buffer for better memory efficiency
+            let tempBuffer = AVAudioPCMBuffer(pcmFormat: audioFile.processingFormat,
+                                              frameCapacity: chunkSize)
+            
             var error: NSError?
             let inputBlock: AVAudioConverterInputBlock = { inNumPackets, outStatus in
                 do {
-                    let tempBuffer = AVAudioPCMBuffer(pcmFormat: audioFile.processingFormat,
-                                                      frameCapacity: AVAudioFrameCount(inNumPackets))
+                    // Use larger chunk size for fewer iterations
+                    let framesToRead = max(AVAudioFrameCount(inNumPackets), chunkSize)
+                    tempBuffer?.frameLength = 0
+                    
                     guard let tempBuffer = tempBuffer else {
                         outStatus.pointee = .endOfStream
                         return nil
                     }
-                    try audioFile.read(into: tempBuffer)
+                    
+                    // Ensure we don't exceed buffer capacity
+                    let maxFrames = min(framesToRead, tempBuffer.frameCapacity)
+                    tempBuffer.frameLength = 0
+                    
+                    try audioFile.read(into: tempBuffer, frameCount: maxFrames)
                     framesRead += Int64(tempBuffer.frameLength)
                     
-                    let progress = min(Float(framesRead) / Float(totalFrames), 1.0)
-                    progressCallback(progress)
+                    // Only update progress periodically to reduce overhead
+                    if framesRead - lastProgressUpdate >= progressUpdateInterval {
+                        let progress = min(Float(framesRead) / Float(totalFrames), 1.0)
+                        progressCallback(progress)
+                        lastProgressUpdate = framesRead
+                    }
                     
-                    outStatus.pointee = .haveData
-                    return tempBuffer
+                    outStatus.pointee = tempBuffer.frameLength > 0 ? .haveData : .endOfStream
+                    return tempBuffer.frameLength > 0 ? tempBuffer : nil
                 } catch {
                     outStatus.pointee = .endOfStream
                     return nil

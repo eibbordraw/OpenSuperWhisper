@@ -57,6 +57,16 @@ final class AppPreferences {
     @UserDefault(key: "beamSize", defaultValue: 5)
     var beamSize: Int
     
+    // Performance settings
+    @UserDefault(key: "useSingleSegment", defaultValue: false)
+    var useSingleSegment: Bool
+    
+    @UserDefault(key: "threadCountOverride", defaultValue: 0) // 0 = auto
+    var threadCountOverride: Int
+    
+    @UserDefault(key: "speedPreset", defaultValue: "balanced")
+    var speedPreset: String // "fastest", "balanced", "quality"
+    
     @UserDefault(key: "debugMode", defaultValue: false)
     var debugMode: Bool
     
